@@ -95,7 +95,7 @@ if __name__ == '__main__':
         image = image.unsqueeze(0)
         return image
 
-    image_paths = ['example1.jpg', 'example2.jpg']
+    image_paths = ['example1.jpg', 'example2.jpg', 'example3.jpg']
 
     with torch.no_grad():
         for path in image_paths:
