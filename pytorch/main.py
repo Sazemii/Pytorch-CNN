@@ -9,6 +9,9 @@ import torch.optim as optim
 import torchvision
 import torchvision.transforms as transforms
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+
 transform = transforms.Compose([
     transforms.ToTensor(),  # converts PIL Images to PyTorchSensors from 0,255 to 0-1
     transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
@@ -134,7 +137,7 @@ if __name__ == '__main__':
     test_loader = torch.utils.data.DataLoader(
         test_data, batch_size=32, shuffle=True, num_workers=2)
 
-    net = NeuralNet()
+    net = NeuralNet().to(device)
     loss_function = nn.CrossEntropyLoss()
     optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
 
@@ -144,6 +147,7 @@ if __name__ == '__main__':
 
         for i, data in enumerate(train_loader):
             inputs, labels = data
+            inputs, labels = inputs.to(device), labels.to(device)
             optimizer.zero_grad()
             outputs = net(inputs)
             loss = loss_function(outputs, labels)
@@ -152,3 +156,49 @@ if __name__ == '__main__':
             running_loss += loss.item()
 
         print(f'Loss: {running_loss / len(train_loader):.4f}')
+
+    torch.save(net.state_dict(), 'trained_net.pth')
+
+    net = NeuralNet().to(device)
+    net.load_state_dict(torch.load('trained_net.pth', weights_only=True))
+
+    correct = 0
+    total = 0
+
+    net.eval()
+
+    with torch.no_grad():
+        for data in test_loader:
+            images, labels = data
+            images, labels = images.to(
+                device), labels.to(device)  # move to GPU
+            outputs = net(images)
+            _, predicted = torch.max(outputs, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+
+    accuracy = 100 * correct / total
+    print(f'Accuracy: {accuracy}%')
+
+    new_transform = transforms.Compose([
+        transforms.Resize((32, 32)),
+        transforms.ToTensor(),
+        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+    ])
+
+    def load_image(image_path):
+        image = Image.open(image_path)
+        image = new_transform(image)
+        image = image.unsqueeze(0)
+        return image
+
+    image_paths = ['example1.jpg', 'example2.jpg']
+    images = [load_image(img) for img in image_paths]
+
+    net.eval()
+    with torch.no_grad():
+        for image in images:
+            image = image.to(device)
+            output = net(image)
+            _, predicted = torch.max(output, 1)
+            print(f'Prediction: {class_names[predicted.item()]}')
