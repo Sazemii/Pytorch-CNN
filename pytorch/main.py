@@ -37,6 +37,9 @@ train_loader = torch.utils.data.DataLoader(
     train_data, batch_size=32, shuffle=True, num_workers=2)
 # feeds 32 images at a time to the model, randomizes order each epoch, 2 background processes to load data
 # in parallel reducing load in gpu
+# num_workers=2 means 2 separate CPU processes are preloading the next batch in the background
+# while the GPU is still training on the current one — without this, the GPU would sit idle
+# waiting for data after every batch, slowing down the whole training loop
 
 """Shuffle is important because -> Prevents the model from learning order patterns, Reduces gradient bias (for ex first batch is cats, the weights get pushed to that
 , then upon encountering batch of dogs it overcorrects then forgets the cats, -> better balance), """
@@ -125,6 +128,10 @@ optimizer = optim.SGD(net.parameters(), lr=0.001, momentum=0.9)
  In plain SGD, the ball rolls but may get stuck in small bumps or oscillate back and forth, slowing down the descent. 
  In SGD with Momentum, however, the ball gains speed and is more likely to skip over small bumps, reaching the valley faster."""
 if __name__ == '__main__':
+    # The dataset and loader definitions above are at module level — they run even when this file
+    # is just imported by another script. Re-defining them here inside __main__ ensures they only
+    # actually execute when you intentionally run this file directly, preventing accidental
+    # downloads or heavy memory use on import.
     train_data = torchvision.datasets.CIFAR10(
         root='/data', train=True, transform=transform, download=True)
 
@@ -158,22 +165,45 @@ if __name__ == '__main__':
         print(f'Loss: {running_loss / len(train_loader):.4f}')
 
     torch.save(net.state_dict(), 'trained_net.pth')
+    # state_dict is a Python dictionary that maps every layer name to its current tensor of weights and biases
+    # saving only the state_dict (not the whole model object) is the recommended practice because
+    # conv1.weight -> [tensor of learned values]
+    # conv1.bias   -> [tensor of learned values]
+    # conv2.weight -> [tensor of learned values]
+    # ...and so on
 
     net = NeuralNet().to(device)
     net.load_state_dict(torch.load('trained_net.pth', weights_only=True))
+    # loads the saved weight snapshot back into a fresh NeuralNet instance
+    # weights_only=True is a safety flag, it tells PyTorch to only restore tensors and skip
+    # any arbitrary Python objects that could be embedded in the file (prevents code injection)
 
     correct = 0
     total = 0
 
     net.eval()
+    # switches the model from training mode to evaluation mode
+    # some layers behave differently during training vs inference, for example, Dropout randomly
+    # zeros out neurons during training to prevent overfitting, but should be disabled at test time
+    # so every neuron contributes to the prediction. BatchNorm similarly uses running statistics
+    # instead of batch statistics. net.eval() flips both of these off so results are deterministic.
 
     with torch.no_grad():
+        # by default PyTorch tracks every operation on tensors so it can compute gradients
+        # during backpropagation — this tracking uses extra memory and compute
+        # since we're just evaluating (not training), we don't need gradients at all
+        # torch.no_grad() turns off that tracking entirely, making inference faster and lighter
         for data in test_loader:
             images, labels = data
             images, labels = images.to(
                 device), labels.to(device)  # move to GPU
             outputs = net(images)
             _, predicted = torch.max(outputs, 1)
+            # torch.max(outputs, 1) scans across dimension 1 (the 10 class scores) and returns
+            # two tensors: the highest score value, and the index where that score lives
+            # the index IS the predicted class (e.g. index 3 = 'cat')
+            # we don't care about the score itself, only which class won, so we discard the
+            # first return value with _ (a Python convention for "I'm throwing this away")
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
 
